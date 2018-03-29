@@ -1,0 +1,189 @@
+---
+title: "Text Prediction Capstone Project"
+author: "Swathi Vijayakumar"
+date: "November 28, 2016"
+output:
+  html_document: default
+  pdf_document: default
+---
+## Purpose and Background
+
+The purpose of this report is to get an understanding of the distribution and relationship between the words, tokens, and phrases in the blog, news and twitter english text data in order to build a predictive text model. This will be done by first performing an exploratory analysis and understanding the frequancies of words and word pairs. 
+
+## Loadig the data, Clean-up and Processing
+
+We will start with loading the required packages and reading in all 3 text files. 
+
+```{r Reading_files, message=FALSE, warning=FALSE}
+# Loading required libraries
+library(tm); library(plyr); library(rJava); library(openNLP); library(stringr); library(RWeka); library(ngram); 
+library(SnowballC); library(wordcloud); library(qdap); library(ngram); library(e1071)
+
+url = "https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+if (!file.exists("Coursera-SwiftKey.zip")){
+  download.file(url, "./Coursera-SwiftKey.zip")
+  unzip("Coursera-SwiftKey.zip")
+}
+
+# Read in all english language data
+twitter = readLines(file("final/en_US/en_US.twitter.txt","r"))
+news = readLines(file("final/en_US/en_US.news.txt","r"))
+blogs = readLines(file("final/en_US/en_US.blogs.txt","r"))
+```
+
+
+Due to amount of time it takes to process the enter data, this exploration will use about 1000 lines from each data set (designated by "_sample"). We will combine the 3 text files and build a corpus. The data cleaning will involve removing numbers, converting all upper case letters to lower case, removing punctuations and removing whitespaces. Finally all profane words will also be removed. 
+
+```{r Random_sampling}
+#Random Sampling from the three text files to be used for model building
+
+# Training data set
+set.seed(40)
+twitter_train = sample(twitter, length(twitter)*0.00045, replace = FALSE)
+news_train = sample(news, length(news)*0.00095, replace = FALSE)
+blogs_train = sample(blogs, length(blogs)*0.0015, replace = FALSE)
+
+# Testing data set
+set.seed(120)
+twitter_test = sample(twitter, length(twitter)*0.000212, replace = FALSE)
+news_test = sample(news, length(news)*0.000494, replace = FALSE)
+blogs_test = sample(blogs, length(blogs)*0.000556, replace = FALSE)
+
+```
+
+## Exploratory analysis
+
+The table below show the following stats: Total number of lines, Longest line and the Total number of words in the 3 text file and the 10,000 random sampling of those files. 
+
+```{r Exploratory_analysis, echo=FALSE}
+# Creating a table of summary statistics
+
+tot_lines = c(length(twitter), length(twitter_train), length(news), 
+              length(news_train), length(blogs), length(blogs_train)) # Counts the total number of lines in the text
+
+longest_line = c(max(nchar(twitter)), max(nchar(twitter_train)),max(nchar(news)),max(nchar(news_train)),
+                 max(nchar(blogs)), max(nchar(blogs_train))) # determines the longest line in the text.
+
+num_words = c(sum(str_count(twitter)), sum(str_count(twitter_train)), sum(str_count(news)), sum(str_count(news_train)), 
+              sum(str_count(blogs)), sum(str_count(blogs_train))) # Counts the number of words in the text
+
+text_stats = matrix(c(tot_lines, longest_line, num_words), ncol = 3, byrow = FALSE)
+colnames(text_stats) <- c("Tot_Lines","Longest_Line", "Num_Words") # specifing the column names
+rownames(text_stats) <- c("Twitter","twitter_train","News", "news_train", "Blog", "Blog_Sample")
+text_stats = as.table(text_stats)
+text_stats
+```
+
+```{r corpus_preprocessing, echo=FALSE}
+# Creating a corpus for text mining and pre-processing
+training_data = c(twitter_train,news_train,blogs_train)
+files = Corpus(VectorSource(training_data))
+
+# Preprocessing/Tolknization
+
+files = tm_map(files, removeNumbers) # removing Numbers
+files = tm_map(files, content_transformer(tolower)) # Convert everything to lowercase
+files = tm_map(files, removePunctuation) # removing punctuations
+files = tm_map(files, stripWhitespace) # remove white spaces
+
+# Remove profanity
+profanity <- read.csv("/Users/skyrit17/Desktop/Personal/DataScientistCertification/capstone/Profanity.csv", header = F)
+profanity <- rep(profanity$V1)
+files <- tm_map(files, removeWords, profanity)
+
+# Create a term document matrix
+term_matrix = TermDocumentMatrix(files)
+```
+
+Shown below is the barplot for the frequency of the top 20 most frequent words that occur in the sample corpus. 
+
+
+   
+```{r Unigram_barplot, echo=FALSE}
+
+# one_gram Frequency
+
+one_gram = NGramTokenizer(files, Weka_control( min = 1, max = 1))
+one_gram_df = data.frame(table(one_gram))[order(data.frame(table(one_gram))$Freq,decreasing = TRUE),]
+head(one_gram_df)
+
+# One_gram barplot
+
+barplot(one_gram_df[1:20,]$Freq, las = 2, names.arg = one_gram_df[1:20,]$words,
+       col ="lightblue", main ="Most frequent words",
+       ylab = "Word frequencies")
+```
+
+The word cloud below depicts 200 of the most frequent words. Words that occur less than a 10 times do not appear.  
+
+```{r Unigram_wordcloud, echo=FALSE}
+
+#wordcloud
+set.seed(1234)
+wordcloud(words = one_gram_df$one_gram, freq = one_gram_df$Freq, min.freq = 10,
+          max.words=200, random.order=FALSE, rot.per=0.35, 
+          colors=brewer.pal(8, "Dark2"))
+```
+
+Shown below are graphs for the top 20 bi, tri & quad-grams. 
+
+```{r Bi_Tri_Quad_grams, echo=FALSE}
+# Bigrams
+
+two_gram = NGramTokenizer(files, Weka_control(min = 2, max = 2))
+two_gram_df = data.frame(table(two_gram))[order(data.frame(table(two_gram))$Freq,decreasing = TRUE),]
+head(two_gram_df)
+#two_gram_df$last = word(two_gram_df$two_gram,-1)
+
+barplot(two_gram_df[1:20,]$Freq, las = 2, names.arg = two_gram_df[1:20,]$two_gram,
+        col ="lightblue", main ="Most frequent Bigrams",
+        ylab = "Word frequencies")
+
+
+# Trigrams
+
+three_gram = NGramTokenizer(files, Weka_control(min = 3, max = 3))
+three_gram_df = data.frame(table(three_gram))[order(data.frame(table(three_gram))$Freq,decreasing = TRUE),]
+head(three_gram_df)
+#three_gram_df$last_2 = word(three_gram_df$three_gram,-2,-1)
+
+barplot(three_gram_df[1:20,]$Freq, las = 2, names.arg = three_gram_df[1:20,]$three_gram,
+        col ="lightblue", main ="Most frequent Trigrams",
+        ylab = "Word frequencies")
+
+
+# quad-grams
+
+four_gram = NGramTokenizer(files, Weka_control(min = 4, max = 4))
+four_gram_df = data.frame(table(four_gram))[order(data.frame(table(four_gram))$Freq,decreasing = TRUE),]
+head(three_gram_df)
+
+barplot(four_gram_df[1:20,]$Freq, las = 2, names.arg = four_gram_df[1:20,]$four_gram,
+        col ="lightblue", main ="Most frequent 4-grams",
+        ylab = "Word frequencies")
+```
+
+
+# Coverage
+
+```{r Coverage, echo=FALSE}
+total_words = sum(one_gram_df$freq)
+
+c<-0;
+i<-1;
+while(c< 0.5*total_words){
+  c<-c+one_gram_df[i,]$freq;
+  i<-i+1;
+}
+r1<-i;
+
+while(c < 0.9*total_words){
+  c<-c+one_gram_df[i,]$freq;
+  i<-i+1;
+}
+
+
+
+```
+
+To cover 50% of all the word instances in the language, `r paste(r1)` unique words will be needed. To cover 90%  will be needed. 
